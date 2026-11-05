@@ -51,8 +51,14 @@ enum CodexSource {
 }
 
 enum ClaudeSource {
-    static func load() async -> UsageInfo {
-        guard let token = accessToken() else { return UsageInfo(error: "Claude 로그인 정보 없음") }
+    enum Result {
+        case ok(UsageInfo, Data)
+        case rateLimited(retryAfter: TimeInterval?)
+        case failed(String)
+    }
+
+    static func fetch() async -> Result {
+        guard let token = accessToken() else { return .failed("Claude 로그인 정보 없음") }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -60,13 +66,24 @@ enum ClaudeSource {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
-                return UsageInfo(error: http.statusCode == 401 ? "토큰 만료 (claude 한번 실행)" : "HTTP \(http.statusCode)")
+                switch http.statusCode {
+                case 429:
+                    let retry = (http.value(forHTTPHeaderField: "Retry-After")).flatMap(TimeInterval.init)
+                    return .rateLimited(retryAfter: retry)
+                case 401: return .failed("토큰 만료 (claude 한번 실행)")
+                default: return .failed("HTTP \(http.statusCode)")
+                }
             }
-            let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-            return UsageInfo(fiveHour: limit(obj["five_hour"]), weekly: limit(obj["seven_day"]))
+            guard let info = parse(data) else { return .failed("응답 형식 오류") }
+            return .ok(info, data)
         } catch {
-            return UsageInfo(error: "네트워크 오류")
+            return .failed("네트워크 오류")
         }
+    }
+
+    static func parse(_ data: Data) -> UsageInfo? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return UsageInfo(fiveHour: limit(obj["five_hour"]), weekly: limit(obj["seven_day"]))
     }
 
     private static func limit(_ any: Any?) -> Limit? {
@@ -109,7 +126,19 @@ final class Store: ObservableObject {
     private var timer: Timer?
     static let pageCount = 2
 
+    // Claude 사용량 API는 요청 제한이 빡빡해서 5분마다만 조회하고, 429가 나면 간격을 늘린다
+    private static let claudeInterval: TimeInterval = 300
+    private var claudeBackoff: TimeInterval = 300
+    private var claudeNextFetch = Date.distantPast
+    private var claudeFetching = false
+
     init() {
+        let d = UserDefaults.standard
+        if let data = d.data(forKey: "claudeCache"), let info = ClaudeSource.parse(data),
+           let at = d.object(forKey: "claudeCacheTime") as? Date {
+            claude = info
+            claudeNextFetch = at.addingTimeInterval(Store.claudeInterval)
+        }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -122,8 +151,32 @@ final class Store: ObservableObject {
             let c = CodexSource.load()
             await MainActor.run { self.codex = c }
         }
+        refreshClaude(force: false)
+    }
+
+    func refreshClaude(force: Bool) {
+        let now = Date()
+        guard !claudeFetching, force || now >= claudeNextFetch else { return }
+        claudeFetching = true
         Task {
-            self.claude = await ClaudeSource.load()
+            let result = await ClaudeSource.fetch()
+            claudeFetching = false
+            switch result {
+            case .ok(let info, let data):
+                claude = info
+                claudeBackoff = Store.claudeInterval
+                claudeNextFetch = Date().addingTimeInterval(Store.claudeInterval)
+                UserDefaults.standard.set(data, forKey: "claudeCache")
+                UserDefaults.standard.set(Date(), forKey: "claudeCacheTime")
+            case .rateLimited(let retryAfter):
+                // 이전 값이 있으면 그대로 보여주고 조용히 나중에 다시 시도
+                claudeBackoff = min(claudeBackoff * 2, 1800)
+                claudeNextFetch = Date().addingTimeInterval(max(retryAfter ?? 0, claudeBackoff))
+                if claude.fiveHour == nil { claude = UsageInfo(error: "요청 제한 중, 잠시 후 자동 재시도") }
+            case .failed(let msg):
+                claudeNextFetch = Date().addingTimeInterval(60)
+                if claude.fiveHour == nil || msg.hasPrefix("토큰") { claude = UsageInfo(error: msg) }
+            }
         }
     }
 
@@ -282,7 +335,7 @@ struct WidgetView: View {
         .padding(6)
         .fixedSize()
         .contextMenu {
-            Button("새로고침") { store.refresh() }
+            Button("새로고침") { store.refresh(); store.refreshClaude(force: true) }
             Button(store.compact ? "크게 보기" : "작게 보기") { store.compact.toggle() }
             Divider()
             Toggle("항상 위에 표시", isOn: $alwaysOnTop)
