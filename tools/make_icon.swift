@@ -32,27 +32,21 @@ func rim(_ path: CGPath, width: CGFloat, _ g: CGGradient, from a: CGPoint, to b:
     ctx.restoreGState()
 }
 
-// MARK: 타일 (살짝 투명한 검정 유리)
+// MARK: 타일 (살짝 투명하지만 선명한 글래스)
 let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
 let tilePath = CGPath(roundedRect: tile, cornerWidth: 185, cornerHeight: 185, transform: nil)
 
 ctx.saveGState()
-ctx.setShadow(offset: CGSize(width: 0, height: -14), blur: 30, color: rgb(0x000000, 0.35))
-ctx.addPath(tilePath); ctx.setFillColor(rgb(0x1E2020, 0.88)); ctx.fillPath()
+ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 26, color: rgb(0x000000, 0.35))
+ctx.addPath(tilePath); ctx.setFillColor(rgb(0x262828, 0.9)); ctx.fillPath()
 ctx.restoreGState()
-
-fill(tilePath, gradient([rgb(0x515656, 0.55), rgb(0x2A2D2D, 0.25), rgb(0x000000, 0.25)], [0, 0.5, 1]),
+fill(tilePath, gradient([rgb(0x4C5050, 0.92), rgb(0x313434, 0.9), rgb(0x1C1E1E, 0.92)], [0, 0.5, 1]),
      from: CGPoint(x: 300, y: 924), to: CGPoint(x: 724, y: 100))
-ctx.saveGState(); ctx.addPath(tilePath); ctx.clip()
-ctx.drawRadialGradient(gradient([rgb(0xFFFFFF, 0.10), rgb(0xFFFFFF, 0)], [0, 1]),
-                       startCenter: CGPoint(x: 280, y: 880), startRadius: 0,
-                       endCenter: CGPoint(x: 280, y: 880), endRadius: 560, options: [])
-ctx.restoreGState()
-// 타일 테두리: 위는 밝게, 아래는 은은하게
-rim(tilePath, width: 6, gradient([rgb(0xFFFFFF, 0.38), rgb(0xFFFFFF, 0.05), rgb(0xFFFFFF, 0.16)], [0, 0.55, 1]),
-    from: CGPoint(x: 512, y: 924), to: CGPoint(x: 512, y: 100))
+// 날카로운 테두리 반사광: 왼쪽 위·오른쪽 아래가 빛남
+rim(tilePath, width: 4, gradient([rgb(0xFFFFFF, 0.7), rgb(0xFFFFFF, 0.08), rgb(0xFFFFFF, 0.04), rgb(0xFFFFFF, 0.35)], [0, 0.35, 0.65, 1]),
+    from: CGPoint(x: 100, y: 924), to: CGPoint(x: 924, y: 100))
 
-// MARK: 반짝이 (크롬 + 무지개빛 테두리)
+// MARK: 반짝이
 func sparkle(center p: CGPoint, size s: CGFloat) -> CGPath {
     let path = CGMutablePath()
     let k = s * 0.14
@@ -64,42 +58,26 @@ func sparkle(center p: CGPoint, size s: CGFloat) -> CGPath {
     path.closeSubpath()
     return path
 }
-let barX: CGFloat = 215, barW: CGFloat = 594, barH: CGFloat = 84
-let sc = CGPoint(x: barX + 95, y: 575), ss: CGFloat = 95
+let sc = CGPoint(x: 320, y: 700), ss: CGFloat = 105
 let star = sparkle(center: sc, size: ss)
-
-ctx.saveGState()
-ctx.setShadow(offset: .zero, blur: 40, color: rgb(0xFFFFFF, 0.28))
-ctx.addPath(star); ctx.setFillColor(rgb(0xDDDDDD)); ctx.fillPath()
-ctx.restoreGState()
-fill(star, gradient([rgb(0xFFFFFF), rgb(0xC9CCCF), rgb(0xB0B4B8), rgb(0xEEF0F2), rgb(0xFFFFFF)], [0, 0.35, 0.55, 0.8, 1]),
+fill(star, gradient([rgb(0xFFFFFF), rgb(0xF4F5F6), rgb(0xDADDE0)], [0, 0.5, 1]),
      from: CGPoint(x: sc.x - ss, y: sc.y + ss), to: CGPoint(x: sc.x + ss, y: sc.y - ss))
-rim(star, width: 5, gradient([rgb(0xFFB070, 0.9), rgb(0xFFFFFF, 0.95), rgb(0x7FB4FF, 0.9)], [0, 0.5, 1]),
-    from: CGPoint(x: sc.x - ss, y: sc.y), to: CGPoint(x: sc.x + ss, y: sc.y))
+rim(star, width: 3, gradient([rgb(0xFFFFFF, 1), rgb(0xFFFFFF, 0.2), rgb(0xFFFFFF, 0.7)], [0, 0.5, 1]),
+    from: CGPoint(x: sc.x - ss, y: sc.y + ss), to: CGPoint(x: sc.x + ss, y: sc.y - ss))
 
-// MARK: 막대 (유리 트랙 + 크롬 채움)
-let track = CGRect(x: barX, y: 340, width: barW, height: barH)
-let trackPath = CGPath(roundedRect: track, cornerWidth: barH / 2, cornerHeight: barH / 2, transform: nil)
-fill(trackPath, gradient([rgb(0x000000, 0.35), rgb(0xFFFFFF, 0.06)], [0, 1]),
-     from: CGPoint(x: 0, y: track.maxY), to: CGPoint(x: 0, y: track.minY))
-rim(trackPath, width: 4, gradient([rgb(0xFFFFFF, 0.08), rgb(0xFFFFFF, 0.02), rgb(0xFFFFFF, 0.35)], [0, 0.5, 1]),
+// MARK: 막대
+let track = CGRect(x: 210, y: 300, width: 604, height: 76)
+let trackPath = CGPath(roundedRect: track, cornerWidth: 38, cornerHeight: 38, transform: nil)
+ctx.addPath(trackPath); ctx.setFillColor(rgb(0xFFFFFF, 0.14)); ctx.fillPath()
+rim(trackPath, width: 3, gradient([rgb(0xFFFFFF, 0.05), rgb(0xFFFFFF, 0.35)], [0, 1]),
     from: CGPoint(x: 0, y: track.maxY), to: CGPoint(x: 0, y: track.minY))
 
-var bar = track.insetBy(dx: 7, dy: 7); bar.size.width = (barW - 14) * 0.7
-let barPath = CGPath(roundedRect: bar, cornerWidth: bar.height / 2, cornerHeight: bar.height / 2, transform: nil)
-ctx.saveGState()
-ctx.setShadow(offset: .zero, blur: 34, color: rgb(0xFFFFFF, 0.35))
-ctx.addPath(barPath); ctx.setFillColor(rgb(0xE8E8E8)); ctx.fillPath()
-ctx.restoreGState()
-fill(barPath, gradient([rgb(0xFFFFFF), rgb(0xE4E6E8), rgb(0xA9ADB2), rgb(0xD5D8DB), rgb(0xFFFFFF)], [0, 0.3, 0.6, 0.85, 1]),
+var bar = track; bar.size.width *= 0.7
+let barPath = CGPath(roundedRect: bar, cornerWidth: 38, cornerHeight: 38, transform: nil)
+fill(barPath, gradient([rgb(0xFFFFFF), rgb(0xEEEFF0), rgb(0xDFE1E3)], [0, 0.5, 1]),
      from: CGPoint(x: 0, y: bar.maxY), to: CGPoint(x: 0, y: bar.minY))
-// 위쪽 광택 줄
-let gloss = CGRect(x: bar.minX + 22, y: bar.maxY - 22, width: bar.width - 44, height: 10)
-ctx.addPath(CGPath(roundedRect: gloss, cornerWidth: 5, cornerHeight: 5, transform: nil))
-ctx.setFillColor(rgb(0xFFFFFF, 0.9)); ctx.fillPath()
-// 무지개빛 테두리
-rim(barPath, width: 4, gradient([rgb(0xFFA060, 0.85), rgb(0xFFFFFF, 0.9), rgb(0x6FA8FF, 0.9)], [0, 0.5, 1]),
-    from: CGPoint(x: bar.minX, y: 0), to: CGPoint(x: bar.maxX, y: 0))
+rim(barPath, width: 3, gradient([rgb(0xFFFFFF, 1), rgb(0xFFFFFF, 0.2), rgb(0xFFFFFF, 0.6)], [0, 0.5, 1]),
+    from: CGPoint(x: 0, y: bar.maxY), to: CGPoint(x: 0, y: bar.minY))
 
 let img = ctx.makeImage()!
 try! NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])!
