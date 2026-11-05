@@ -332,7 +332,9 @@ struct WidgetView: View {
         .clipShape(shape)
         .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 1))
         .clipped()
-        .padding(6)
+        // 창 기본 그림자는 밝은 배경에서 검은 테두리가 생겨서 직접 부드러운 그림자를 그린다
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+        .padding(16)
         .fixedSize()
         .contextMenu {
             Button("새로고침") { store.refresh(); store.refreshClaude(force: true) }
@@ -359,7 +361,7 @@ final class FloatingPanel: NSPanel {
     // 윗부분(로고 줄)을 잡으면 창 이동, 나머지는 좌우로 쓸어서 페이지 넘기기
     private func isInHeader(_ event: NSEvent) -> Bool {
         let compact = MainActor.assumeIsolated { store?.compact ?? false }
-        let headerHeight: CGFloat = compact ? 32 : 48
+        let headerHeight: CGFloat = compact ? 42 : 58
         return event.locationInWindow.y > frame.height - headerHeight
     }
 
@@ -425,7 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.contentView = hosting
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let size = hosting.fittingSize
@@ -454,7 +456,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             f.origin.y += f.height - size.height
             f.size = size
             self.panel.setFrame(f, display: true, animate: false)
-            self.panel.invalidateShadow()
         }
     }
 }
