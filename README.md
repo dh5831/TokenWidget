@@ -1,3 +1,5 @@
+<img src="icon.png" width="128" align="right">
+
 # TokenWidget
 
 macOS 화면 위에 떠 있는 Claude / Codex 사용량 위젯.
