@@ -1,3 +1,5 @@
 TokenWidget.app/
 *.zip
 .DS_Store
+windows/node_modules/
+windows/dist/

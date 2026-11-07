@@ -1,0 +1,37 @@
+{
+  "name": "tokenwidget",
+  "productName": "TokenWidget",
+  "version": "1.0.0",
+  "description": "Floating Claude / Codex usage widget for Windows",
+  "author": "dh5831",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "local.dh.TokenWidget",
+    "files": [
+      "src/**",
+      "renderer/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "TokenWidget-Setup-${version}.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  }
+}
