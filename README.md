@@ -29,11 +29,31 @@ open TokenWidget.app
 Xcode Command Line Tools(`xcode-select --install`)만 있으면 됩니다.
 로그인 시 자동 실행하려면 `TokenWidget.app`을 응용 프로그램 폴더로 옮긴 뒤 **시스템 설정 → 일반 → 로그인 항목**에 추가하세요.
 
+## Windows
+
+`windows/` 폴더에 같은 기능의 Electron 버전이 있습니다. Windows 10/11 x64용입니다.
+
+```sh
+cd windows
+npm install
+npm test
+npm run dist
+```
+
+`windows/dist/TokenWidget-Setup-1.0.0.exe`를 실행하면 관리자 권한 없이 설치됩니다. macOS에서도 빌드할 수 있습니다. 코드 서명이 없어 처음 실행할 때 SmartScreen 경고가 뜰 수 있습니다.
+
+macOS 버전과 다른 점:
+
+- Claude 토큰은 `%USERPROFILE%\.claude\.credentials.json`에서 읽습니다.
+- Codex 로그는 `%USERPROFILE%\.codex\sessions`에서 읽습니다.
+- 배경 블러 대신 반투명한 어두운 카드로 표시합니다.
+- 우클릭 메뉴에서 Windows 시작 시 자동 실행을 켤 수 있습니다.
+
 ## 데이터 출처
 
 | | 출처 | 비고 |
 |---|---|---|
-| Codex | `~/.codex/sessions/**/*.jsonl`의 마지막 `rate_limits` | 마지막으로 Codex를 쓴 시점 기준 |
-| Claude | `https://api.anthropic.com/api/oauth/usage` | 비공식 API라 바뀔 수 있음. "토큰 만료"가 뜨면 `claude`를 한 번 실행 |
+| Codex | `https://chatgpt.com/backend-api/wham/usage` (`~/.codex/auth.json` 토큰) | Codex 앱과 같은 실시간 값. 비공식 API라 바뀔 수 있음. 실패하면 `~/.codex/sessions/**/*.jsonl`의 마지막 `rate_limits`를 씀 |
+| Claude | `https://api.anthropic.com/api/oauth/usage` | 비공식 API라 바뀔 수 있음. 토큰이 만료되면 위젯이 `claude -p`로 Haiku에 짧은 요청을 보내 Claude Code가 토큰을 갱신하게 함 (사용량이 아주 조금 듦) |
 
-토큰이나 사용량 정보는 외부로 전송하지 않으며, Claude 사용량 조회 요청만 Anthropic API로 보냅니다.
+토큰이나 사용량 정보는 외부로 전송하지 않으며, 사용량 조회 요청만 Anthropic API와 ChatGPT API로 보냅니다.
