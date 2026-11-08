@@ -54,6 +54,6 @@ macOS 버전과 다른 점:
 | | 출처 | 비고 |
 |---|---|---|
 | Codex | `~/.codex/sessions/**/*.jsonl`의 마지막 `rate_limits` | 마지막으로 Codex를 쓴 시점 기준 |
-| Claude | `https://api.anthropic.com/api/oauth/usage` | 비공식 API라 바뀔 수 있음. "토큰 만료"가 뜨면 `claude`를 한 번 실행 |
+| Claude | `https://api.anthropic.com/api/oauth/usage` | 비공식 API라 바뀔 수 있음. 토큰이 만료되면 위젯이 `claude -p`로 Haiku에 짧은 요청을 보내 Claude Code가 토큰을 갱신하게 함 (사용량이 아주 조금 듦) |
 
 토큰이나 사용량 정보는 외부로 전송하지 않으며, Claude 사용량 조회 요청만 Anthropic API로 보냅니다.

@@ -2,7 +2,7 @@ const path = require('node:path');
 const { app, BrowserWindow, Menu, ipcMain, net, screen } = require('electron');
 const { Settings } = require('./settings');
 const { Store } = require('./store');
-const { loadCodex, fetchClaude } = require('./sources');
+const { loadCodex, fetchClaude, makeCliRefresher } = require('./sources');
 
 const MARGIN = 16; // 카드 둘레의 그림자 영역
 const PAGE_COUNT = 2;
@@ -130,10 +130,11 @@ if (!app.requestSingleInstanceLock()) {
     settings = new Settings(path.join(app.getPath('userData'), 'settings.json'), {
       page: 0, compact: false, alwaysOnTop: true,
     });
+    const refreshToken = makeCliRefresher();
     store = new Store({
       settings,
       loadCodex: () => loadCodex(),
-      fetchClaude: () => fetchClaude(net.fetch),
+      fetchClaude: () => fetchClaude(net.fetch, undefined, refreshToken),
       onChange: send,
     });
     registerIpc();

@@ -58,7 +58,18 @@ enum ClaudeSource {
     }
 
     static func fetch() async -> Result {
-        guard let token = accessToken() else { return .failed("Claude 로그인 정보 없음") }
+        guard var cred = credentials() else { return .failed("Claude 로그인 정보 없음") }
+        // 위젯은 토큰을 직접 갱신하지 않고, 만료되면 Claude Code가 갱신하게 한다
+        if cred.expired, let fresh = await refreshViaCLI() { cred = fresh }
+        var result = await request(cred.token)
+        if case .failed(let msg) = result, msg.hasPrefix("토큰"),
+           let fresh = await refreshViaCLI(), fresh.token != cred.token {
+            result = await request(fresh.token)
+        }
+        return result
+    }
+
+    private static func request(_ token: String) async -> Result {
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -94,19 +105,70 @@ enum ClaudeSource {
         return Limit(leftPercent: max(0, 100 - used), resetsAt: reset)
     }
 
-    private static func accessToken() -> String? {
+    struct Credentials {
+        var token: String
+        var expiresAt: Date?
+        var expired: Bool { expiresAt.map { $0 < Date().addingTimeInterval(60) } ?? false }
+    }
+
+    private static func credentials() -> Credentials? {
+        guard let data = run("/usr/bin/security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"])?.output,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = obj["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String else { return nil }
+        let expires = (oauth["expiresAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+        return Credentials(token: token, expiresAt: expires)
+    }
+
+    // 실패한 뒤에는 10분 동안 다시 실행하지 않는다
+    nonisolated(unsafe) private static var lastRefresh = Date.distantPast
+    private static let refreshLock = NSLock()
+
+    // 아주 짧은 요청 하나를 보내면 Claude Code가 키체인의 토큰을 새로 받아 둔다
+    private static func refreshViaCLI() async -> Credentials? {
+        let allowed = refreshLock.withLock {
+            guard Date().timeIntervalSince(lastRefresh) > 600 else { return false }
+            lastRefresh = Date()
+            return true
+        }
+        guard allowed, let claude = claudePath() else { return nil }
+        return await Task.detached {
+            let ok = run(claude, ["-p", "Reply with OK", "--model", "haiku", "--tools", "",
+                                  "--no-session-persistence"], timeout: 90)?.status == 0
+            guard ok, let cred = credentials(), !cred.expired else { return nil }
+            refreshLock.withLock { lastRefresh = .distantPast }
+            return cred
+        }.value
+    }
+
+    // 앱으로 실행하면 PATH에 ~/.local/bin 등이 없어서 흔한 설치 위치를 직접 찾는다
+    private static func claudePath() -> String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let candidates = ["\(home)/.local/bin/claude", "\(home)/.claude/local/claude",
+                          "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+        if let found = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) { return found }
+        guard let out = run("/bin/zsh", ["-lc", "command -v claude"])?.output,
+              let path = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              path.hasPrefix("/") else { return nil }
+        return path
+    }
+
+    private static func run(_ exe: String, _ args: [String], timeout: TimeInterval = 15) -> (status: Int32, output: Data)? {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        p.currentDirectoryURL = FileManager.default.temporaryDirectory
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
         guard (try? p.run()) != nil else { return nil }
+        let timer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timer)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = obj["claudeAiOauth"] as? [String: Any] else { return nil }
-        return oauth["accessToken"] as? String
+        timer.cancel()
+        return (p.terminationStatus, data)
     }
 }
 

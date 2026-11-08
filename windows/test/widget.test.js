@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { loadCodex, parseClaude, fetchClaude } = require('../src/sources');
+const { loadCodex, parseClaude, fetchClaude, makeCliRefresher } = require('../src/sources');
 const { Store } = require('../src/store');
 const { resetText } = require('../renderer/ui');
 
@@ -109,4 +109,50 @@ test('리셋 문구', () => {
   assert.equal(at(2 * 3600 + 5 * 60), 'Resets in 2시간 5분');
   assert.equal(at(6 * 3600 + 5 * 60), 'Resets in 6시간');
   assert.equal(at(50 * 3600), 'Resets in 2일 2시간');
+});
+
+test('Claude: 만료되었으면 CLI로 갱신한 새 토큰을 쓴다', async () => {
+  const file = path.join(tmp(), '.credentials.json');
+  const write = (token, expiresAt) => fs.writeFileSync(file, JSON.stringify({ claudeAiOauth: { accessToken: token, expiresAt } }));
+  write('old', Date.now() - 1000);
+  const seen = [];
+  const ok = async (_u, o) => { seen.push(o.headers.Authorization); return new Response('{}', { status: 200 }); };
+  const r = await fetchClaude(ok, file, async () => { write('new', Date.now() + 3_600_000); return true; });
+  assert.equal(r.kind, 'ok');
+  assert.deepEqual(seen, ['Bearer new']);
+});
+
+test('Claude: 401이면 갱신 후 한 번만 다시 요청한다', async () => {
+  const file = path.join(tmp(), '.credentials.json');
+  const write = (token) => fs.writeFileSync(file, JSON.stringify({ claudeAiOauth: { accessToken: token, expiresAt: Date.now() + 3_600_000 } }));
+  write('old');
+  const seen = [];
+  const f = async (_u, o) => {
+    seen.push(o.headers.Authorization);
+    return new Response('{}', { status: o.headers.Authorization === 'Bearer new' ? 200 : 401 });
+  };
+  assert.equal((await fetchClaude(f, file, async () => { write('new'); return true; })).kind, 'ok');
+  assert.deepEqual(seen, ['Bearer old', 'Bearer new']);
+  seen.length = 0;
+  write('old');
+  assert.match((await fetchClaude(f, file, async () => false)).message, /^토큰 만료/);
+  assert.deepEqual(seen, ['Bearer old']);
+});
+
+test('CLI 갱신: 실패하면 10분 동안 다시 실행하지 않고, 동시 호출은 한 번만 실행', async () => {
+  const clock = { now: 0 };
+  let runs = 0;
+  let ok = false;
+  const refresh = makeCliRefresher({
+    find: async () => 'claude', exec: async () => { runs++; return { ok }; }, clock: () => clock.now,
+  });
+  const [a, b] = await Promise.all([refresh(), refresh()]);
+  assert.deepEqual([a, b, runs], [false, false, 1]);
+  assert.equal(await refresh(), false);
+  assert.equal(runs, 1);
+  clock.now += 600_001;
+  ok = true;
+  assert.equal(await refresh(), true);
+  assert.equal(await refresh(), true); // 성공하면 바로 다시 쓸 수 있다
+  assert.equal(runs, 3);
 });

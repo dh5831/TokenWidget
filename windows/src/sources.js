@@ -1,10 +1,11 @@
 const fs = require('node:fs/promises');
+const { execFile } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
 
 const codexRoot = () =>
   path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
-const claudeCredentials = () =>
+const claudeCredentialsFile = () =>
   path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), '.credentials.json');
 
 async function jsonlFiles(dir) {
@@ -71,17 +72,18 @@ function parseClaude(text) {
   }
 }
 
-async function claudeToken(file = claudeCredentials()) {
+async function claudeCredentials(file = claudeCredentialsFile()) {
   try {
-    return JSON.parse(await fs.readFile(file, 'utf8')).claudeAiOauth?.accessToken ?? null;
+    const oauth = JSON.parse(await fs.readFile(file, 'utf8')).claudeAiOauth;
+    if (!oauth?.accessToken) return null;
+    const expiresAt = typeof oauth.expiresAt === 'number' ? oauth.expiresAt : null;
+    return { token: oauth.accessToken, expired: expiresAt !== null && expiresAt < Date.now() + 60_000 };
   } catch {
     return null;
   }
 }
 
-async function fetchClaude(fetchImpl, tokenFile) {
-  const token = await claudeToken(tokenFile);
-  if (!token) return { kind: 'failed', message: 'Claude 로그인 정보 없음' };
+async function requestUsage(fetchImpl, token) {
   try {
     const res = await fetchImpl('https://api.anthropic.com/api/oauth/usage', {
       headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' },
@@ -101,4 +103,65 @@ async function fetchClaude(fetchImpl, tokenFile) {
   }
 }
 
-module.exports = { loadCodex, parseClaude, fetchClaude };
+// 위젯은 토큰을 직접 갱신하지 않고, 만료되면 Claude Code가 갱신하게 한다
+async function fetchClaude(fetchImpl, tokenFile, refresh = async () => false) {
+  let cred = await claudeCredentials(tokenFile);
+  if (!cred) return { kind: 'failed', message: 'Claude 로그인 정보 없음' };
+  if (cred.expired && (await refresh())) cred = (await claudeCredentials(tokenFile)) ?? cred;
+  const result = await requestUsage(fetchImpl, cred.token);
+  if (result.kind === 'failed' && result.message.startsWith('토큰') && (await refresh())) {
+    const fresh = await claudeCredentials(tokenFile);
+    if (fresh && fresh.token !== cred.token) return requestUsage(fetchImpl, fresh.token);
+  }
+  return result;
+}
+
+const CLAUDE_ARGS = ['-p', 'Reply with OK', '--model', 'haiku', '--tools', '', '--no-session-persistence'];
+
+async function findClaude() {
+  const home = os.homedir();
+  const candidates = process.platform === 'win32'
+    ? [path.join(home, '.local', 'bin', 'claude.exe'),
+      path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm', 'claude.cmd')]
+    : [path.join(home, '.local', 'bin', 'claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude'];
+  for (const c of candidates) {
+    try {
+      await fs.access(c);
+      return c;
+    } catch { /* 다음 위치 확인 */ }
+  }
+  const found = await run(process.platform === 'win32' ? 'where.exe' : 'which', ['claude'], 10_000);
+  return found.ok ? found.stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? null : null;
+}
+
+function run(file, args, timeout) {
+  return new Promise((resolve) => {
+    // .cmd 파일은 셸로만 실행할 수 있어서, 그때는 인자를 직접 따옴표로 감싼다
+    const shell = /\.(cmd|bat)$/i.test(file);
+    const finalArgs = shell ? args.map((a) => `"${a}"`) : args;
+    execFile(shell ? `"${file}"` : file, finalArgs,
+      { timeout, windowsHide: true, shell, cwd: os.tmpdir() },
+      (err, stdout) => resolve({ ok: !err, stdout: String(stdout) }));
+  });
+}
+
+// 아주 짧은 요청 하나를 보내면 Claude Code가 자격 증명 파일의 토큰을 새로 받아 둔다
+// 실패한 뒤에는 10분 동안 다시 실행하지 않는다
+function makeCliRefresher({ find = findClaude, exec = run, clock = Date.now } = {}) {
+  let last = -Infinity;
+  let running = null;
+  return () => {
+    if (running) return running;
+    if (clock() - last < 600_000) return Promise.resolve(false);
+    last = clock();
+    running = (async () => {
+      const claude = await find();
+      const ok = claude ? (await exec(claude, CLAUDE_ARGS, 90_000)).ok : false;
+      if (ok) last = -Infinity;
+      return ok;
+    })().finally(() => { running = null; });
+    return running;
+  };
+}
+
+module.exports = { loadCodex, parseClaude, fetchClaude, makeCliRefresher };
