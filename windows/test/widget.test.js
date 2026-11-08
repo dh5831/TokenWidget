@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { loadCodex, parseClaude, fetchClaude, makeCliRefresher } = require('../src/sources');
+const { loadCodex, loadCodexUsage, parseClaude, fetchClaude, makeCliRefresher } = require('../src/sources');
 const { Store } = require('../src/store');
 const { resetText } = require('../renderer/ui');
 
@@ -155,4 +155,25 @@ test('CLI 갱신: 실패하면 10분 동안 다시 실행하지 않고, 동시 �
   assert.equal(await refresh(), true);
   assert.equal(await refresh(), true); // 성공하면 바로 다시 쓸 수 있다
   assert.equal(runs, 3);
+});
+
+test('Codex: 서버 값을 우선 쓰고, 실패하면 세션 로그를 쓴다', async () => {
+  const dir = tmp();
+  const authFile = path.join(dir, 'auth.json');
+  fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: 'tok', account_id: 'acc' } }));
+  const live = async (_u, o) => {
+    assert.equal(o.headers.Authorization, 'Bearer tok');
+    assert.equal(o.headers['ChatGPT-Account-Id'], 'acc');
+    return Response.json({ rate_limit: {
+      primary_window: { used_percent: 7, reset_at: 1794135430 },
+      secondary_window: { used_percent: 19, reset_at: 1794529029 },
+    } });
+  };
+  const info = await loadCodexUsage(live, { authFile, root: path.join(dir, 'sessions') });
+  assert.deepEqual(info, {
+    fiveHour: { leftPercent: 93, resetsAt: 1794135430000 },
+    weekly: { leftPercent: 81, resetsAt: 1794529029000 },
+  });
+  const down = async () => new Response('', { status: 401 });
+  assert.equal((await loadCodexUsage(down, { authFile, root: path.join(dir, 'sessions') })).error, '~/.codex/sessions 없음');
 });

@@ -17,7 +17,37 @@ struct UsageInfo {
 // MARK: - Data sources
 
 enum CodexSource {
-    static func load() -> UsageInfo {
+    // Codex 앱의 "남은 사용량"과 같은 값을 서버에서 바로 받는다. 안 되면 세션 로그를 읽는다
+    static func load() async -> UsageInfo {
+        if let live = await fetchLive() { return live }
+        return loadFromLogs()
+    }
+
+    private static func fetchLive() async -> UsageInfo? {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/auth.json")
+        guard let data = try? Data(contentsOf: file),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = obj["tokens"] as? [String: Any],
+              let token = tokens["access_token"] as? String else { return nil }
+        var req = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/usage")!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let account = tokens["account_id"] as? String { req.setValue(account, forHTTPHeaderField: "ChatGPT-Account-Id") }
+        req.setValue("TokenWidget", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 15
+        guard let (body, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let rl = json["rate_limit"] as? [String: Any] else { return nil }
+        func window(_ any: Any?) -> Limit? {
+            guard let d = any as? [String: Any], let used = (d["used_percent"] as? NSNumber)?.doubleValue else { return nil }
+            let reset = (d["reset_at"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+            return Limit(leftPercent: max(0, 100 - used), resetsAt: reset)
+        }
+        let info = UsageInfo(fiveHour: window(rl["primary_window"]), weekly: window(rl["secondary_window"]))
+        return info.fiveHour == nil && info.weekly == nil ? nil : info
+    }
+
+    private static func loadFromLogs() -> UsageInfo {
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
         guard let en = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.contentModificationDateKey]) else {
             return UsageInfo(error: "~/.codex/sessions 없음")
@@ -210,7 +240,7 @@ final class Store: ObservableObject {
     func refresh() {
         now = Date()
         Task.detached {
-            let c = CodexSource.load()
+            let c = await CodexSource.load()
             await MainActor.run { self.codex = c }
         }
         refreshClaude(force: false)

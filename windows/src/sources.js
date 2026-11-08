@@ -3,8 +3,8 @@ const { execFile } = require('node:child_process');
 const os = require('node:os');
 const path = require('node:path');
 
-const codexRoot = () =>
-  path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
+const codexHome = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+const codexRoot = () => path.join(codexHome(), 'sessions');
 const claudeCredentialsFile = () =>
   path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), '.credentials.json');
 
@@ -54,6 +54,36 @@ async function loadCodex(root = codexRoot(), nowMs = Date.now()) {
     }
   }
   return { error: 'Codex 사용 기록 없음' };
+}
+
+function codexWindow(d) {
+  if (!d || typeof d.used_percent !== 'number') return null;
+  const resetsAt = typeof d.reset_at === 'number' ? d.reset_at * 1000 : null;
+  return { leftPercent: Math.max(0, 100 - d.used_percent), resetsAt };
+}
+
+// Codex 앱의 "남은 사용량"과 같은 값을 서버에서 바로 받는다
+async function fetchCodexLive(fetchImpl, authFile = path.join(codexHome(), 'auth.json')) {
+  try {
+    const tokens = JSON.parse(await fs.readFile(authFile, 'utf8')).tokens;
+    if (!tokens?.access_token) return null;
+    const headers = { Authorization: `Bearer ${tokens.access_token}`, 'User-Agent': 'TokenWidget' };
+    if (tokens.account_id) headers['ChatGPT-Account-Id'] = tokens.account_id;
+    const res = await fetchImpl('https://chatgpt.com/backend-api/wham/usage', {
+      headers, signal: AbortSignal.timeout(15000),
+    });
+    if (res.status !== 200) return null;
+    const rl = (await res.json()).rate_limit;
+    const info = { fiveHour: codexWindow(rl?.primary_window), weekly: codexWindow(rl?.secondary_window) };
+    return info.fiveHour || info.weekly ? info : null;
+  } catch {
+    return null;
+  }
+}
+
+// 서버 조회가 안 되면 세션 로그의 마지막 값을 쓴다
+async function loadCodexUsage(fetchImpl, { authFile, root, nowMs } = {}) {
+  return (await fetchCodexLive(fetchImpl, authFile)) ?? loadCodex(root, nowMs);
 }
 
 function claudeLimit(d) {
@@ -164,4 +194,4 @@ function makeCliRefresher({ find = findClaude, exec = run, clock = Date.now } = 
   };
 }
 
-module.exports = { loadCodex, parseClaude, fetchClaude, makeCliRefresher };
+module.exports = { loadCodex, loadCodexUsage, parseClaude, fetchClaude, makeCliRefresher };
